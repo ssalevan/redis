@@ -50,7 +50,6 @@ pqsort.o: pqsort.c
 pubsub.o: pubsub.c redis.h fmacros.h config.h ../deps/lua/src/lua.h \
   ../deps/lua/src/luaconf.h ae.h sds.h dict.h adlist.h zmalloc.h anet.h \
   ziplist.h intset.h version.h util.h rdb.h rio.h
-rand.o: rand.c
 rdb.o: rdb.c redis.h fmacros.h config.h ../deps/lua/src/lua.h \
   ../deps/lua/src/luaconf.h ae.h sds.h dict.h adlist.h zmalloc.h anet.h \
   ziplist.h intset.h version.h util.h rdb.h rio.h lzf.h zipmap.h \
@@ -73,7 +72,7 @@ replication.o: replication.c redis.h fmacros.h config.h \
 rio.o: rio.c fmacros.h rio.h sds.h util.h crc64.h
 scripting.o: scripting.c redis.h fmacros.h config.h ../deps/lua/src/lua.h \
   ../deps/lua/src/luaconf.h ae.h sds.h dict.h adlist.h zmalloc.h anet.h \
-  ziplist.h intset.h version.h util.h rdb.h rio.h sha1.h rand.h \
+  ziplist.h intset.h version.h util.h rdb.h rio.h sha1.h \
   ../deps/lua/src/lauxlib.h ../deps/lua/src/lua.h \
   ../deps/lua/src/lualib.h
 sds.o: sds.c sds.h zmalloc.h
