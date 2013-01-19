@@ -57,6 +57,11 @@ else
   DEBUG= -g -rdynamic -ggdb
 endif
 
+ifeq ($(uname_S),Darwin)
+  # Needed for embedded LuaJIT on 64-bit OSX/Darwin:  http://luajit.org/install.html#embed
+  FINAL_LDFLAGS= $(LDFLAGS) -pagezero_size 10000 -image_base 100000000
+endif
+
 # Include paths to dependencies
 FINAL_CFLAGS+= -I../deps/hiredis -I../deps/linenoise -I../deps/luajit-2.0/src
 
