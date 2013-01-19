@@ -452,15 +452,20 @@ void luaLoadLib(lua_State *lua, const char *libname, lua_CFunction luafunc) {
   lua_call(lua, 1, 0);
 }
 
+LUALIB_API int (luaopen_cjson) (lua_State *L);     
+LUALIB_API int (luaopen_struct) (lua_State *L);
+LUALIB_API int (luaopen_cmsgpack) (lua_State *L);
+
 void luaLoadLibraries(lua_State *lua) {
     luaLoadLib(lua, "", luaopen_base);
     luaLoadLib(lua, LUA_TABLIBNAME, luaopen_table);
     luaLoadLib(lua, LUA_STRLIBNAME, luaopen_string);
     luaLoadLib(lua, LUA_MATHLIBNAME, luaopen_math);
     luaLoadLib(lua, LUA_DBLIBNAME, luaopen_debug); 
-//  luaLoadLib(lua, "cjson", luaopen_cjson);
-//  luaLoadLib(lua, "struct", luaopen_struct);
-//  luaLoadLib(lua, "cmsgpack", luaopen_cmsgpack);
+    luaLoadLib(lua, LUA_BITLIBNAME, luaopen_bit); 
+    luaLoadLib(lua, "cjson", luaopen_cjson);
+    luaLoadLib(lua, "struct", luaopen_struct);
+    luaLoadLib(lua, "cmsgpack", luaopen_cmsgpack);
 
 #if 0 /* Stuff that we don't load currently, for sandboxing concerns. */
     luaLoadLib(lua, LUA_LOADLIBNAME, luaopen_package);
