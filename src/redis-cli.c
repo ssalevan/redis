@@ -308,7 +308,7 @@ static int cliSelect() {
     return REDIS_ERR;
 }
 
-/* Connect to the client. If force is not zero the connection is performed
+/* Connect to the server. If force is not zero the connection is performed
  * even if there is already a connected socket. */
 static int cliConnect(int force) {
     if (context == NULL || force) {
@@ -801,6 +801,7 @@ static void repl() {
                     sdsfree(config.hostip);
                     config.hostip = sdsnew(argv[1]);
                     config.hostport = atoi(argv[2]);
+                    cliRefreshPrompt();
                     cliConnect(1);
                 } else if (argc == 1 && !strcasecmp(argv[0],"clear")) {
                     linenoiseClearScreen();
@@ -958,8 +959,8 @@ unsigned long long sendSync(int fd) {
             fprintf(stderr,"Error reading bulk length while SYNCing\n");
             exit(1);
         }
-        if (*p == '\n') break;
-        p++;
+        if (*p == '\n' && p != buf) break;
+        if (*p != '\n') p++;
     }
     *p = '\0';
     if (buf[0] == '-') {
@@ -975,7 +976,7 @@ static void slaveMode(void) {
     char buf[1024];
 
     fprintf(stderr,"SYNC with master, discarding %llu "
-                   "bytes of bulk tranfer...\n", payload);
+                   "bytes of bulk transfer...\n", payload);
 
     /* Discard the payload. */
     while(payload) {
@@ -1140,7 +1141,7 @@ static void pipeMode(void) {
                         int j;
 
                         eof = 1;
-                        /* Everything transfered, so we queue a special
+                        /* Everything transferred, so we queue a special
                          * ECHO command that we can match in the replies
                          * to make sure everything was read from the server. */
                         for (j = 0; j < 20; j++)
@@ -1182,6 +1183,7 @@ static void findBigKeys(void) {
     unsigned long long samples = 0;
     redisReply *reply1, *reply2, *reply3 = NULL;
     char *sizecmd, *typename[] = {"string","list","set","hash","zset"};
+    char *typeunit[] = {"bytes","items","members","fields","members"};
     int type;
 
     printf("\n# Press ctrl+c when you have had enough of it... :)\n");
@@ -1233,9 +1235,10 @@ static void findBigKeys(void) {
         reply3 = redisCommand(context,"%s %s", sizecmd, reply1->str);
         if (reply3 && reply3->type == REDIS_REPLY_INTEGER) {
             if (biggest[type] < reply3->integer) {
-                printf("[%6s] %s | biggest so far with size %llu\n",
+                printf("Biggest %-6s found so far '%s' with %llu %s.\n",
                     typename[type], reply1->str,
-                    (unsigned long long) reply3->integer);
+                    (unsigned long long) reply3->integer,
+                    typeunit[type]);
                 biggest[type] = reply3->integer;
             }
         }
@@ -1288,19 +1291,19 @@ int main(int argc, char **argv) {
 
     /* Latency mode */
     if (config.latency_mode) {
-        cliConnect(0);
+        if (cliConnect(0) == REDIS_ERR) exit(1);
         latencyMode();
     }
 
     /* Slave mode */
     if (config.slave_mode) {
-        cliConnect(0);
+        if (cliConnect(0) == REDIS_ERR) exit(1);
         slaveMode();
     }
 
     /* Get RDB mode. */
     if (config.getrdb_mode) {
-        cliConnect(0);
+        if (cliConnect(0) == REDIS_ERR) exit(1);
         getRDB();
     }
 
@@ -1312,7 +1315,7 @@ int main(int argc, char **argv) {
 
     /* Find big keys */
     if (config.bigkeys) {
-        cliConnect(0);
+        if (cliConnect(0) == REDIS_ERR) exit(1);
         findBigKeys();
     }
 
