@@ -1176,6 +1176,7 @@ void initServerConfig() {
     server.cluster_enabled = 0;
     server.cluster.configfile = zstrdup("nodes.conf");
     server.lua_caller = NULL;
+    server.lua_fenv_file = NULL;
     server.lua_time_limit = REDIS_LUA_TIME_LIMIT;
     server.lua_client = NULL;
     server.lua_timedout = 0;

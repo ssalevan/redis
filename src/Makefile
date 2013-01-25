@@ -160,7 +160,8 @@ endif
 
 # redis-server
 $(REDIS_SERVER_NAME): $(REDIS_SERVER_OBJ)
-	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/luajit-2.0/src/libluajit.a $(FINAL_LIBS)
+	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/luajit-2.0/src/libluajit.a $(FINAL_LIBS) 
+	#-Wl,-E
 
 # redis-sentinel
 $(REDIS_SENTINEL_NAME): $(REDIS_SERVER_NAME)
@@ -182,6 +183,12 @@ $(REDIS_CHECK_DUMP_NAME): $(REDIS_CHECK_DUMP_OBJ)
 $(REDIS_CHECK_AOF_NAME): $(REDIS_CHECK_AOF_OBJ)
 	$(REDIS_LD) -o $@ $^ $(FINAL_LIBS)
 
+scripting_bin2c.h: scripting.lua .make-prerequisites
+	../deps/lua/src/lua bin2c.lua scripting.lua bin2c_retval lua 0 0 > $@
+
+scripting_fenv_bin2c.h: ../redis_fenv.lua .make-prerequisites
+	../deps/lua/src/lua bin2c.lua ../redis_fenv.lua bin2c_retval lua 0 1 > $@
+
 # Because the jemalloc.h header is generated as a part of the jemalloc build,
 # building it should complete before building any other object. Instead of
 # depending on a single artifact, build all dependencies first.
@@ -189,7 +196,7 @@ $(REDIS_CHECK_AOF_NAME): $(REDIS_CHECK_AOF_OBJ)
 	$(REDIS_CC) -c $<
 
 clean:
-	rm -rf $(REDIS_SERVER_NAME) $(REDIS_SENTINEL_NAME) $(REDIS_CLI_NAME) $(REDIS_BENCHMARK_NAME) $(REDIS_CHECK_DUMP_NAME) $(REDIS_CHECK_AOF_NAME) *.o *.gcda *.gcno *.gcov redis.info lcov-html
+	rm -rf $(REDIS_SERVER_NAME) $(REDIS_SENTINEL_NAME) $(REDIS_CLI_NAME) $(REDIS_BENCHMARK_NAME) $(REDIS_CHECK_DUMP_NAME) $(REDIS_CHECK_AOF_NAME) scripting_bin2c.h *.o *.gcda *.gcno *.gcov redis.info lcov-html
 
 .PHONY: clean
 

@@ -355,6 +355,9 @@ void loadServerConfigFromString(char *config) {
         } else if (!strcasecmp(argv[0],"cluster-config-file") && argc == 2) {
             zfree(server.cluster.configfile);
             server.cluster.configfile = zstrdup(argv[1]);
+        } else if (!strcasecmp(argv[0],"lua-fenv-file") && argc == 2) {
+            zfree(server.lua_fenv_file);
+            server.lua_fenv_file = zstrdup(argv[1]);
         } else if (!strcasecmp(argv[0],"lua-time-limit") && argc == 2) {
             server.lua_time_limit = strtoll(argv[1],NULL,10);
         } else if (!strcasecmp(argv[0],"slowlog-log-slower-than") &&

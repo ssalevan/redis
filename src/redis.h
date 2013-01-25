@@ -784,6 +784,7 @@ struct redisServer {
     redisClient *lua_client;   /* The "fake client" to query Redis from Lua */
     redisClient *lua_caller;   /* The client running EVAL right now, or NULL */
     dict *lua_scripts;         /* A dictionary of SHA1 -> Lua scripts */
+    char* lua_fenv_file;       /* File to load function environment from */
     long long lua_time_limit;  /* Script timeout in seconds */
     long long lua_time_start;  /* Start time of script */
     int lua_write_dirty;  /* True if a write command was called during the

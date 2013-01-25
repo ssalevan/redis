@@ -34,7 +34,7 @@
 #include <lauxlib.h>
 #include <lualib.h>
 #include <ctype.h>
-#include <math.h>
+#include <math.h>   
 
 char *redisProtocolToLuaType_Int(lua_State *lua, char *reply);
 char *redisProtocolToLuaType_Bulk(lua_State *lua, char *reply);
@@ -42,6 +42,27 @@ char *redisProtocolToLuaType_Status(lua_State *lua, char *reply);
 char *redisProtocolToLuaType_Error(lua_State *lua, char *reply);
 char *redisProtocolToLuaType_MultiBulk(lua_State *lua, char *reply);
 void sha1hex(char *digest, char *script, size_t len);
+
+/* we make a mini-struct that we share with Lua, rather than binding redisClient */
+typedef struct scriptBridge {
+    robj** argv;
+    int argc;
+    int numkeys;
+    redisClient* c;
+    lua_State* lua;
+} sb;
+
+sb g_scriptBridge;
+
+const sb* ljr_getScriptBridge() {
+    return &g_scriptBridge;
+}
+
+// TODO: better name
+void ljr_redirectLuaCaller( redisClient* c ) {
+    server.lua_caller = NULL;
+    selectDb(c,server.lua_client->db->id); /* set DB ID from Lua client */
+}
 
 /* Take a Redis reply in the Redis protocol format and convert it into a
  * Lua type. Thanks to this function, and the introduction of not connected
@@ -358,68 +379,6 @@ int luaRedisSha1hexCommand(lua_State *lua) {
     return 1;
 }
 
-/* Returns a table with a single field 'field' set to the string value
- * passed as argument. This helper function is handy when returning
- * a Redis Protocol error or status reply from Lua:
- *
- * return redis.error_reply("ERR Some Error")
- * return redis.status_reply("ERR Some Error")
- */
-int luaRedisReturnSingleFieldTable(lua_State *lua, char *field) {
-    if (lua_gettop(lua) != 1 || lua_type(lua,-1) != LUA_TSTRING) {
-        luaPushError(lua, "wrong number or type of arguments");
-        return 1;
-    }
-
-    lua_newtable(lua);
-    lua_pushstring(lua, field);
-    lua_pushvalue(lua, -3);
-    lua_settable(lua, -3);
-    return 1;
-}
-
-int luaRedisErrorReplyCommand(lua_State *lua) {
-    return luaRedisReturnSingleFieldTable(lua,"err");
-}
-
-int luaRedisStatusReplyCommand(lua_State *lua) {
-    return luaRedisReturnSingleFieldTable(lua,"ok");
-}
-
-int luaLogCommand(lua_State *lua) {
-    int j, argc = lua_gettop(lua);
-    int level;
-    sds log;
-
-    if (argc < 2) {
-        luaPushError(lua, "redis.log() requires two arguments or more.");
-        return 1;
-    } else if (!lua_isnumber(lua,-argc)) {
-        luaPushError(lua, "First argument must be a number (log level).");
-        return 1;
-    }
-    level = lua_tonumber(lua,-argc);
-    if (level < REDIS_DEBUG || level > REDIS_WARNING) {
-        luaPushError(lua, "Invalid debug level.");
-        return 1;
-    }
-
-    /* Glue together all the arguments */
-    log = sdsempty();
-    for (j = 1; j < argc; j++) {
-        size_t len;
-        char *s;
-
-        s = (char*)lua_tolstring(lua,(-argc)+j,&len);
-        if (s) {
-            if (j != 1) log = sdscatlen(log," ",1);
-            log = sdscatlen(log,s,len);
-        }
-    }
-    redisLogRaw(level,log);
-    sdsfree(log);
-    return 0;
-}
 
 void luaMaskCountHook(lua_State *lua, lua_Debug *ar) {
     long long elapsed;
@@ -446,75 +405,33 @@ void luaMaskCountHook(lua_State *lua, lua_Debug *ar) {
     }
 }
 
+LUALIB_API int (luaopen_cjson) (lua_State *L);     
+LUALIB_API int (luaopen_struct) (lua_State *L);
+LUALIB_API int (luaopen_cmsgpack) (lua_State *L);
+
+
 void luaLoadLib(lua_State *lua, const char *libname, lua_CFunction luafunc) {
   lua_pushcfunction(lua, luafunc);
   lua_pushstring(lua, libname);
   lua_call(lua, 1, 0);
 }
 
-LUALIB_API int (luaopen_cjson) (lua_State *L);     
-LUALIB_API int (luaopen_struct) (lua_State *L);
-LUALIB_API int (luaopen_cmsgpack) (lua_State *L);
-
 void luaLoadLibraries(lua_State *lua) {
     luaLoadLib(lua, "", luaopen_base);
+    luaLoadLib(lua, LUA_LOADLIBNAME, luaopen_package);
     luaLoadLib(lua, LUA_TABLIBNAME, luaopen_table);
     luaLoadLib(lua, LUA_STRLIBNAME, luaopen_string);
     luaLoadLib(lua, LUA_MATHLIBNAME, luaopen_math);
     luaLoadLib(lua, LUA_DBLIBNAME, luaopen_debug); 
     luaLoadLib(lua, LUA_BITLIBNAME, luaopen_bit); 
+    luaLoadLib(lua, LUA_FFILIBNAME, luaopen_ffi); 
+    luaLoadLib(lua, LUA_LOADLIBNAME, luaopen_package);
+    luaLoadLib(lua, LUA_OSLIBNAME, luaopen_os);
+    luaLoadLib(lua, LUA_IOLIBNAME, luaopen_io);
+    luaLoadLib(lua, LUA_JITLIBNAME, luaopen_jit); 
     luaLoadLib(lua, "cjson", luaopen_cjson);
     luaLoadLib(lua, "struct", luaopen_struct);
     luaLoadLib(lua, "cmsgpack", luaopen_cmsgpack);
-
-#if 0 /* Stuff that we don't load currently, for sandboxing concerns. */
-    luaLoadLib(lua, LUA_LOADLIBNAME, luaopen_package);
-    luaLoadLib(lua, LUA_OSLIBNAME, luaopen_os);
-#endif
-}
-
-/* Remove a functions that we don't want to expose to the Redis scripting
- * environment. */
-void luaRemoveUnsupportedFunctions(lua_State *lua) {
-    lua_pushnil(lua);
-    lua_setglobal(lua,"loadfile");
-}
-
-/* This function installs metamethods in the global table _G that prevent
- * the creation of globals accidentally.
- *
- * It should be the last to be called in the scripting engine initialization
- * sequence, because it may interact with creation of globals. */
-void scriptingEnableGlobalsProtection(lua_State *lua) {
-    char *s[32];
-    sds code = sdsempty();
-    int j = 0;
-
-    /* strict.lua from: http://metalua.luaforge.net/src/lib/strict.lua.html.
-     * Modified to be adapted to Redis. */
-    s[j++]="local mt = {}\n";
-    s[j++]="setmetatable(_G, mt)\n";
-    s[j++]="mt.__newindex = function (t, n, v)\n";
-    s[j++]="  if debug.getinfo(2) then\n";
-    s[j++]="    local w = debug.getinfo(2, \"S\").what\n";
-    s[j++]="    if w ~= \"main\" and w ~= \"C\" then\n";
-    s[j++]="      error(\"Script attempted to create global variable '\"..tostring(n)..\"'\", 2)\n";
-    s[j++]="    end\n";
-    s[j++]="  end\n";
-    s[j++]="  rawset(t, n, v)\n";
-    s[j++]="end\n";
-    s[j++]="mt.__index = function (t, n)\n";
-    s[j++]="  if debug.getinfo(2) and debug.getinfo(2, \"S\").what ~= \"C\" then\n";
-    s[j++]="    error(\"Script attempted to access unexisting global variable '\"..tostring(n)..\"'\", 2)\n";
-    s[j++]="  end\n";
-    s[j++]="  return rawget(t, n)\n";
-    s[j++]="end\n";
-    s[j++]=NULL;
-
-    for (j = 0; s[j] != NULL; j++) code = sdscatlen(code,s[j],strlen(s[j]));
-    luaL_loadbuffer(lua,code,sdslen(code),"@enable_strict_lua");
-    lua_pcall(lua,0,0,0);
-    sdsfree(code);
 }
 
 /* Initialize the scripting environment.
@@ -523,76 +440,54 @@ void scriptingEnableGlobalsProtection(lua_State *lua) {
  * See scriptingReset() for more information. */
 void scriptingInit(void) {
     lua_State *lua = lua_open();
-
-    luaLoadLibraries(lua);
-    luaRemoveUnsupportedFunctions(lua);
+    int bin2c_retval;
 
     /* Initialize a dictionary we use to map SHAs to scripts.
      * This is useful for replication, as we need to replicate EVALSHA
      * as EVAL, so we need to remember the associated script. */
     server.lua_scripts = dictCreate(&shaScriptObjectDictType,NULL);
 
-    /* Register the redis commands table and fields */
-    lua_newtable(lua);
+    luaLoadLibraries(lua);
 
-    /* redis.call */
+    /* Add original call/pcall/sha1hex implementations */
+    lua_newtable(lua);
+    lua_pushvalue(lua, -1); /* keep table on stack */
+    lua_setglobal(lua, "redis");
     lua_pushstring(lua,"call");
     lua_pushcfunction(lua,luaRedisCallCommand);
     lua_settable(lua,-3);
-
-    /* redis.pcall */
     lua_pushstring(lua,"pcall");
     lua_pushcfunction(lua,luaRedisPCallCommand);
     lua_settable(lua,-3);
-
-    /* redis.log and log levels. */
-    lua_pushstring(lua,"log");
-    lua_pushcfunction(lua,luaLogCommand);
-    lua_settable(lua,-3);
-
-    lua_pushstring(lua,"LOG_DEBUG");
-    lua_pushnumber(lua,REDIS_DEBUG);
-    lua_settable(lua,-3);
-
-    lua_pushstring(lua,"LOG_VERBOSE");
-    lua_pushnumber(lua,REDIS_VERBOSE);
-    lua_settable(lua,-3);
-
-    lua_pushstring(lua,"LOG_NOTICE");
-    lua_pushnumber(lua,REDIS_NOTICE);
-    lua_settable(lua,-3);
-
-    lua_pushstring(lua,"LOG_WARNING");
-    lua_pushnumber(lua,REDIS_WARNING);
-    lua_settable(lua,-3);
-
-    /* redis.sha1hex */
     lua_pushstring(lua, "sha1hex");
     lua_pushcfunction(lua, luaRedisSha1hexCommand);
     lua_settable(lua, -3);
+    lua_pop(lua,1);
 
-    /* redis.error_reply and redis.status_reply */
-    lua_pushstring(lua, "error_reply");
-    lua_pushcfunction(lua, luaRedisErrorReplyCommand);
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "status_reply");
-    lua_pushcfunction(lua, luaRedisStatusReplyCommand);
-    lua_settable(lua, -3);
-
-    /* Finally set the table as 'redis' global var. */
-    lua_setglobal(lua,"redis");
-
-    /* Add a helper function that we use to sort the multi bulk output of non
-     * deterministic commands, when containing 'false' elements. */
-    {
-        char *compare_func =    "function __redis__compare_helper(a,b)\n"
-                                "  if a == false then a = '' end\n"
-                                "  if b == false then b = '' end\n"
-                                "  return a<b\n"
-                                "end\n";
-        luaL_loadbuffer(lua,compare_func,strlen(compare_func),"@cmp_func_def");
-        lua_pcall(lua,0,0,0);
+    /* Read from bin2c-converted scripting.lua */
+    #include "scripting_bin2c.h"
+    if (bin2c_retval) {
+        redisLog(REDIS_WARNING,"scripting initialization error: %s", lua_tostring(lua,-1));
+        exit(1); /* TODO: something more graceful? */
     }
+    /* Load the function environment if specified
+     * otherwise use build-time environment */
+    if (server.lua_fenv_file) {
+        /* TODO */
+        redisLog(REDIS_WARNING,"TODO: need to implement loading of fenv file.  Exiting.");
+        exit(1);
+    } else {
+        #include "scripting_fenv_bin2c.h"
+        if (bin2c_retval) {
+            redisLog(REDIS_WARNING,"Could not load default fenv. Exiting. %s", lua_tostring(lua, -1));
+            exit(1); /* TODO: something more graceful? */
+        }
+    }
+    if (!lua_istable(lua,-1)) {
+        redisLog(REDIS_WARNING,"Redis fenv script did not return a table. Exiting.");
+        exit(-1); /* TODO: something more graceful? */
+    }
+    lua_setglobal(lua,"redis_fenv");
 
     /* Create the (non connected) client that we use to execute Redis commands
      * inside the Lua interpreter.
@@ -602,11 +497,6 @@ void scriptingInit(void) {
         server.lua_client = createClient(-1);
         server.lua_client->flags |= REDIS_LUA_CLIENT;
     }
-
-    /* Lua beginners ofter don't use "local", this is likely to introduce
-     * subtle bugs in their code. To prevent problems we protect accesses
-     * to global variables. */
-    scriptingEnableGlobalsProtection(lua);
 
     server.lua = lua;
 }
@@ -646,82 +536,6 @@ void sha1hex(char *digest, char *script, size_t len) {
     digest[40] = '\0';
 }
 
-void luaReplyToRedisReply(redisClient *c, lua_State *lua) {
-    int t = lua_type(lua,-1);
-
-    switch(t) {
-    case LUA_TSTRING:
-        addReplyBulkCBuffer(c,(char*)lua_tostring(lua,-1),lua_strlen(lua,-1));
-        break;
-    case LUA_TBOOLEAN:
-        addReply(c,lua_toboolean(lua,-1) ? shared.cone : shared.nullbulk);
-        break;
-    case LUA_TNUMBER:
-        addReplyLongLong(c,(long long)lua_tonumber(lua,-1));
-        break;
-    case LUA_TTABLE:
-        /* We need to check if it is an array, an error, or a status reply.
-         * Error are returned as a single element table with 'err' field.
-         * Status replies are returned as single element table with 'ok' field */
-        lua_pushstring(lua,"err");
-        lua_gettable(lua,-2);
-        t = lua_type(lua,-1);
-        if (t == LUA_TSTRING) {
-            sds err = sdsnew(lua_tostring(lua,-1));
-            sdsmapchars(err,"\r\n","  ",2);
-            addReplySds(c,sdscatprintf(sdsempty(),"-%s\r\n",err));
-            sdsfree(err);
-            lua_pop(lua,2);
-            return;
-        }
-
-        lua_pop(lua,1);
-        lua_pushstring(lua,"ok");
-        lua_gettable(lua,-2);
-        t = lua_type(lua,-1);
-        if (t == LUA_TSTRING) {
-            sds ok = sdsnew(lua_tostring(lua,-1));
-            sdsmapchars(ok,"\r\n","  ",2);
-            addReplySds(c,sdscatprintf(sdsempty(),"+%s\r\n",ok));
-            sdsfree(ok);
-            lua_pop(lua,1);
-        } else {
-            void *replylen = addDeferredMultiBulkLength(c);
-            int j = 1, mbulklen = 0;
-
-            lua_pop(lua,1); /* Discard the 'ok' field value we popped */
-            while(1) {
-                lua_pushnumber(lua,j++);
-                lua_gettable(lua,-2);
-                t = lua_type(lua,-1);
-                if (t == LUA_TNIL) {
-                    lua_pop(lua,1);
-                    break;
-                }
-                luaReplyToRedisReply(c, lua);
-                mbulklen++;
-            }
-            setDeferredMultiBulkLength(c,replylen,mbulklen);
-        }
-        break;
-    default:
-        addReply(c,shared.nullbulk);
-    }
-    lua_pop(lua,1);
-}
-
-/* Set an array of Redis String Objects as a Lua array (table) stored into a
- * global variable. */
-void luaSetGlobalArray(lua_State *lua, char *var, robj **elev, int elec) {
-    int j;
-
-    lua_newtable(lua);
-    for (j = 0; j < elec; j++) {
-        lua_pushlstring(lua,(char*)elev[j]->ptr,sdslen(elev[j]->ptr));
-        lua_rawseti(lua,-2,j+1);
-    }
-    lua_setglobal(lua,var);
-}
 
 /* Define a lua function with the specified function name and body.
  * The function name musts be a 2 characters long string, since all the
@@ -735,11 +549,14 @@ void luaSetGlobalArray(lua_State *lua, char *var, robj **elev, int elec) {
 int luaCreateFunction(redisClient *c, lua_State *lua, char *funcname, robj *body) {
     sds funcdef = sdsempty();
 
-    funcdef = sdscat(funcdef,"function ");
+    funcdef = sdscat(funcdef,"function sha_funcs.");
     funcdef = sdscatlen(funcdef,funcname,42);
-    funcdef = sdscatlen(funcdef,"() ",3);
+    funcdef = sdscat(funcdef,"( KEYS, ARGV ) \n");
     funcdef = sdscatlen(funcdef,body->ptr,sdslen(body->ptr));
-    funcdef = sdscatlen(funcdef," end",4);
+    funcdef = sdscatlen(funcdef,"\n end",5);
+    funcdef = sdscat(funcdef,"\n setfenv(sha_funcs.");
+    funcdef = sdscatlen(funcdef,funcname,42);
+    funcdef = sdscat(funcdef,", redis_fenv)");
 
     if (luaL_loadbuffer(lua,funcdef,sdslen(funcdef),"@user_script")) {
         addReplyErrorFormat(c,"Error compiling script (new function): %s\n",
@@ -773,15 +590,7 @@ void evalGenericCommand(redisClient *c, int evalsha) {
     char funcname[43];
     long long numkeys;
     int delhook = 0, err;
-
-    /* We want the same PRNG sequence at every call so that our PRNG is
-     * not affected by external state. */
-    lua_getglobal(lua, "math");
-    lua_pushstring(lua, "randomseed");
-    lua_gettable(lua, -2 );
-    lua_pushnumber(lua, 0);
-    lua_pcall(lua, 1, 0, 0);
-    lua_pop(lua, 1);
+    int evalfailed;
 
     /* We set this flag to zero to remember that so far no random command
      * was called. This way we can allow the user to call commands like
@@ -819,28 +628,6 @@ void evalGenericCommand(redisClient *c, int evalsha) {
         funcname[42] = '\0';
     }
 
-    /* Try to lookup the Lua function */
-    lua_getglobal(lua, funcname);
-    if (lua_isnil(lua,1)) {
-        lua_pop(lua,1); /* remove the nil from the stack */
-        /* Function not defined... let's define it if we have the
-         * body of the function. If this is an EVALSHA call we can just
-         * return an error. */
-        if (evalsha) {
-            addReply(c, shared.noscripterr);
-            return;
-        }
-        if (luaCreateFunction(c,lua,funcname,c->argv[1]) == REDIS_ERR) return;
-        /* Now the following is guaranteed to return non nil */
-        lua_getglobal(lua, funcname);
-        redisAssert(!lua_isnil(lua,1));
-    }
-
-    /* Populate the argv and keys table accordingly to the arguments that
-     * EVAL received. */
-    luaSetGlobalArray(lua,"KEYS",c->argv+3,numkeys);
-    luaSetGlobalArray(lua,"ARGV",c->argv+3+numkeys,c->argc-3-numkeys);
-
     /* Select the right DB in the context of the Lua client */
     selectDb(server.lua_client,c->db->id);
     
@@ -856,10 +643,23 @@ void evalGenericCommand(redisClient *c, int evalsha) {
         delhook = 1;
     }
 
-    /* At this point whatever this script was never seen before or if it was
-     * already defined, we can call it. We have zero arguments and expect
-     * a single return value. */
-    err = lua_pcall(lua,0,1,0);
+    /* Setup the scriptBridge with our argument/keys context */
+    g_scriptBridge.argv = c->argv;
+    g_scriptBridge.argc = c->argc;
+    g_scriptBridge.numkeys = numkeys;
+    g_scriptBridge.c = c;
+    g_scriptBridge.lua = lua;
+
+    /* Pass control to our Lua implementation */
+    lua_getglobal(lua,"evalGenericCommand_Lua");
+    lua_pushstring(lua,funcname);
+    lua_pushboolean(lua,evalsha);
+    err = lua_pcall(lua,2,1,0);
+    if (err) {
+        redisLog(REDIS_WARNING,"Failed to evaluate script: %s",lua_tostring(lua,-1));
+    }
+    evalfailed = lua_toboolean(lua, -1);  /* evalGenericCommand_Lua return true if early out*/
+    lua_pop(lua,-1);
 
     /* Perform some cleanup that we need to do both on error and success. */
     if (delhook) lua_sethook(lua,luaMaskCountHook,0,0); /* Disable hook */
@@ -870,19 +670,9 @@ void evalGenericCommand(redisClient *c, int evalsha) {
         aeCreateFileEvent(server.el,c->fd,AE_READABLE,
                           readQueryFromClient,c);
     }
-    server.lua_caller = NULL;
-    selectDb(c,server.lua_client->db->id); /* set DB ID from Lua client */
+    //server.lua_caller = NULL;
+    //selectDb(c,server.lua_client->db->id); /* set DB ID from Lua client */
     lua_gc(lua,LUA_GCSTEP,1);
-
-    if (err) {
-        addReplyErrorFormat(c,"Error running script (call to %s): %s\n",
-            funcname, lua_tostring(lua,-1));
-        lua_pop(lua,1); /* Consume the Lua reply. */
-    } else {
-        /* On success convert the Lua return value into Redis protocol, and
-         * send it to * the client. */
-        luaReplyToRedisReply(c,lua);
-    }
 
     /* If we have slaves attached we want to replicate this command as
      * EVAL instead of EVALSHA. We do this also in the AOF as currently there
@@ -894,7 +684,7 @@ void evalGenericCommand(redisClient *c, int evalsha) {
      * 2) Remember what slave already received a given script, and replicate
      *    the EVALSHA against this slaves when possible.
      */
-    if (evalsha) {
+    if (evalsha && !evalfailed) {
         robj *script = dictFetchValue(server.lua_scripts,c->argv[1]->ptr);
 
         redisAssertWithInfo(c,NULL,script != NULL);
