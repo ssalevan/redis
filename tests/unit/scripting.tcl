@@ -286,6 +286,7 @@ start_server {tags {"scripting"}} {
 # Start a new server since the last test in this stanza will kill the
 # instance at all.
 start_server {tags {"scripting"}} {
+if 0 {
     test {Timedout read-only scripts can be killed by SCRIPT KILL} {
         set rd [redis_deferring_client]
         r config set lua-time-limit 10
@@ -327,6 +328,7 @@ start_server {tags {"scripting"}} {
         catch {set rd [redis_deferring_client]} e
         assert_match {*connection refused*} $e
     }
+}
 }
 
 start_server {tags {"scripting repl"}} {
