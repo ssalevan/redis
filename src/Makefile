@@ -15,7 +15,7 @@
 release_hdr := $(shell sh -c './mkreleasehdr.sh')
 uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
 OPTIMIZATION?=-O2
-DEPENDENCY_TARGETS=hiredis linenoise lua luajit-2.0
+DEPENDENCY_TARGETS=hiredis linenoise lua luajit-2.0 libgeohash iwi
 
 # Default settings
 STD= -std=c99 -pedantic
@@ -63,7 +63,7 @@ ifeq ($(uname_S),Darwin)
 endif
 
 # Include paths to dependencies
-FINAL_CFLAGS+= -I../deps/hiredis -I../deps/linenoise -I../deps/luajit-2.0/src
+FINAL_CFLAGS+= -I../deps/hiredis -I../deps/linenoise -I../deps/luajit-2.0/src -I../deps/libgeohash/include -I../deps/iwi
 
 ifeq ($(MALLOC),tcmalloc)
   FINAL_CFLAGS+= -DUSE_TCMALLOC
@@ -104,7 +104,7 @@ endif
 
 REDIS_SERVER_NAME= redis-server
 REDIS_SENTINEL_NAME= redis-sentinel
-REDIS_SCRIPTLIB_OBJ= ../deps/lua/src/lua_cjson.o ../deps/lua/src/strbuf.o ../deps/lua/src/lua_struct.o ../deps/lua/src/lua_cmsgpack.o
+REDIS_SCRIPTLIB_OBJ= ../deps/lua/src/lua_cjson.o ../deps/lua/src/strbuf.o ../deps/lua/src/lua_struct.o ../deps/lua/src/lua_cmsgpack.o ../deps/iwi/iwi.o
 REDIS_SERVER_OBJ= adlist.o ae.o anet.o dict.o redis.o sds.o zmalloc.o lzf_c.o lzf_d.o pqsort.o zipmap.o sha1.o ziplist.o release.o networking.o util.o object.o db.o replication.o rdb.o t_string.o t_list.o t_set.o t_zset.o t_hash.o config.o aof.o pubsub.o multi.o debug.o sort.o intset.o syncio.o cluster.o crc16.o endianconv.o slowlog.o scripting.o bio.o rio.o memtest.o crc64.o bitops.o sentinel.o $(REDIS_SCRIPTLIB_OBJ)
 REDIS_CLI_NAME= redis-cli
 REDIS_CLI_OBJ= anet.o sds.o adlist.o redis-cli.o zmalloc.o release.o anet.o ae.o crc64.o
@@ -160,7 +160,7 @@ endif
 
 # redis-server
 $(REDIS_SERVER_NAME): $(REDIS_SERVER_OBJ)
-	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/luajit-2.0/src/libluajit.a $(FINAL_LIBS)
+	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/luajit-2.0/src/libluajit.a ../deps/libgeohash/build/lib/libgeohash.a $(FINAL_LIBS)
 
 # redis-sentinel
 $(REDIS_SENTINEL_NAME): $(REDIS_SERVER_NAME)

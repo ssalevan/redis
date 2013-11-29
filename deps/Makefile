@@ -34,6 +34,8 @@ endif
 
 distclean:
 	-(cd hiredis && $(MAKE) clean) > /dev/null || true
+	-(cd iwi && $(MAKE) clean) > /dev/null || true
+	-(cd libgeohash/build && $(MAKE) clean) > /dev/null || true
 	-(cd linenoise && $(MAKE) clean) > /dev/null || true
 	-(cd lua && $(MAKE) clean) > /dev/null || true
 	-(cd luajit-2.0 && $(MAKE) clean) > /dev/null || true
@@ -54,6 +56,12 @@ linenoise: .make-prerequisites
 
 .PHONY: linenoise
 
+libgeohash: .make-prerequisites
+	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
+	cd libgeohash && mkdir -p build && cd build && cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_BINARY_DIR=.. && $(MAKE)
+
+.PHONY: libgeohash
+
 ifeq ($(uname_S),SunOS)
   # Make isinf() available
   LUA_CFLAGS= -D__C99FEATURES__=1
@@ -73,6 +81,12 @@ luajit-2.0: .make-prerequisites
 	cd luajit-2.0/src && $(MAKE) all
 
 .PHONY: luajit-2.0
+
+iwi: .make-prerequisites
+	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
+	cd iwi && $(MAKE) iwi.o
+
+.PHONY: iwi
 
 JEMALLOC_CFLAGS= -std=gnu99 -Wall -pipe -g3 -O3 -funroll-loops $(CFLAGS)
 JEMALLOC_LDFLAGS= $(LDFLAGS)

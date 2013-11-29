@@ -1,3 +1,9 @@
 [submodule "deps/luajit-2.0"]
 	path = deps/luajit-2.0
 	url = http://luajit.org/git/luajit-2.0.git
+[submodule "deps/libgeohash"]
+	path = deps/libgeohash
+	url = https://github.com/lyokato/libgeohash
+[submodule "deps/iwi"]
+	path = deps/iwi
+	url = https://github.com/leite/iwi
