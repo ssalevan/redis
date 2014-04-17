@@ -3,7 +3,7 @@
 	url = http://luajit.org/git/luajit-2.0.git
 [submodule "deps/libgeohash"]
 	path = deps/libgeohash
-	url = https://github.com/lyokato/libgeohash
+	url = https://github.com/ssalevan/libgeohash
 [submodule "deps/iwi"]
 	path = deps/iwi
-	url = https://github.com/leite/iwi
+	url = https://github.com/ssalevan/iwi
